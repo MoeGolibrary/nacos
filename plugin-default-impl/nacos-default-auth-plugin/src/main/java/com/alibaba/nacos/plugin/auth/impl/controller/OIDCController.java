@@ -19,6 +19,7 @@ package com.alibaba.nacos.plugin.auth.impl.controller;
 import com.alibaba.nacos.api.common.Constants;
 import com.alibaba.nacos.common.codec.Base64;
 import com.alibaba.nacos.common.utils.JacksonUtils;
+import com.alibaba.nacos.core.utils.Loggers;
 import com.alibaba.nacos.plugin.auth.exception.AccessException;
 import com.alibaba.nacos.plugin.auth.impl.constant.AuthConstants;
 import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCClient;
@@ -53,27 +54,27 @@ import java.nio.charset.StandardCharsets;
 @RestController
 @RequestMapping(OIDCController.PATH)
 public class OIDCController {
-    
+
     public static final String PATH = "/v1/auth/oidc";
-    
+
     public static final String CALLBACK_PATH = PATH + "/callback";
-    
+
     private final OIDCClient oidcClient;
-    
+
     private final OIDCService oidcService;
-    
+
     @Autowired
     public OIDCController(OIDCClient oidcClient, OIDCService oidcService) {
         this.oidcClient = oidcClient;
         this.oidcService = oidcService;
     }
-    
+
     private static String buildRedirectUriWithPayload(String origin, String resultCode, String result) {
         // split the origin URL into base URL and hash route
         int hashIndex = origin.indexOf(AuthConstants.HASH_ROUTE);
         String baseUrl = hashIndex != -1 ? origin.substring(0, hashIndex) : origin;
         String hashRoute = hashIndex != -1 ? origin.substring(hashIndex) : "";
-        
+
         // build redirect url with hash route and token
         UriComponentsBuilder redirectUriBuilder = UriComponentsBuilder.fromUriString(baseUrl);
         if (!hashRoute.isEmpty()) {
@@ -87,7 +88,7 @@ public class OIDCController {
         }
         return redirectUriBuilder.build().toUriString() + hashRoute;
     }
-    
+
     /**
      * Get current OIDC provider.
      */
@@ -98,7 +99,7 @@ public class OIDCController {
         }
         return oidcClient.getProviderInfo();
     }
-    
+
     /**
      * Start Open ID Connect Authentication Flow.
      *
@@ -112,18 +113,18 @@ public class OIDCController {
         if (oidcClient.checkIfProviderIsNotExist()) {
             return;
         }
-        
+
         String callbackUri = ServletUriComponentsBuilder.fromCurrentContextPath().path(CALLBACK_PATH).toUriString();
-        
+
         AuthenticationRequest authRequest = oidcClient.createAuthenticationRequest(callbackUri, origin);
-        
+
         session.setAttribute(AuthConstants.OIDC_STATE, authRequest.getState().getValue());
         session.setAttribute(AuthConstants.OIDC_NONCE, authRequest.getNonce().getValue());
-        
+
         // Redirect to Authentication endpoint
         response.sendRedirect(authRequest.toURI().toString());
     }
-    
+
     /**
      * Authorization server callback this interface, process the authorization code and exchange token.
      *
@@ -157,11 +158,15 @@ public class OIDCController {
             response.sendRedirect(uriString);
             return;
         }
-        
+
         // Exchange the authorization code for the information
         String callbackUri = ServletUriComponentsBuilder.fromCurrentContextPath().path(CALLBACK_PATH).toUriString();
         UserInfo userInfo = oidcClient.getUserInfo(new AuthorizationCode(code), callbackUri, state.getNonce());
-        
+
+        // 输出userInfo
+        Loggers.AUTH.warn("try login with LDAP, user: {}", userInfo.toJSONString());
+
+
         // Extract the username from the user info
         String preferredUsername = userInfo.getPreferredUsername();
         NacosUser nacosUser;
@@ -173,25 +178,25 @@ public class OIDCController {
             response.sendRedirect(uriString);
             return;
         }
-        
+
         session.setAttribute(AuthConstants.NACOS_USER_KEY, nacosUser);
         session.setAttribute(com.alibaba.nacos.plugin.auth.constant.Constants.Identity.IDENTITY_ID,
                 nacosUser.getUserName());
-        
+
         response.addHeader(AuthConstants.AUTHORIZATION_HEADER, AuthConstants.TOKEN_PREFIX + nacosUser.getToken());
-        
+
         ObjectNode result = JacksonUtils.createEmptyJsonNode();
         result.put(Constants.ACCESS_TOKEN, nacosUser.getToken());
         result.put(Constants.TOKEN_TTL, oidcService.getTokenTtlInSeconds(nacosUser.getToken()));
         result.put(Constants.GLOBAL_ADMIN, nacosUser.isGlobalAdmin());
         result.put(Constants.USERNAME, nacosUser.getUserName());
-        
+
         byte[] resultCodedBytes = Base64.encodeBase64(result.toString().getBytes(StandardCharsets.UTF_8));
-        
+
         String uriString = buildRedirectUriWithPayload(state.getOrigin(), AuthConstants.OIDC_PARAM_TOKEN,
                 new String(resultCodedBytes, StandardCharsets.UTF_8));
-        
+
         response.sendRedirect(uriString);
     }
-    
+
 }
