@@ -20,6 +20,7 @@ import com.alibaba.nacos.common.utils.StringUtils;
 import com.alibaba.nacos.core.utils.Loggers;
 import com.alibaba.nacos.plugin.auth.exception.AccessException;
 import com.alibaba.nacos.plugin.auth.impl.constant.AuthConstants;
+import com.alibaba.nacos.plugin.auth.impl.persistence.RoleInfo;
 import com.alibaba.nacos.plugin.auth.impl.persistence.User;
 import com.alibaba.nacos.plugin.auth.impl.roles.NacosRoleServiceImpl;
 import com.alibaba.nacos.plugin.auth.impl.token.TokenManagerDelegate;
@@ -32,6 +33,9 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Open ID Connect User and Token Service.
@@ -97,7 +101,6 @@ public class OIDCService {
             userDetails = userDetailsService.loadUserByUsername(oidcUsername);
         } catch (UsernameNotFoundException ignored) {
             userDetailsService.createUser(oidcUsername, "");
-            roleService.addRole("ROLE_DEV", oidcUsername);
             User user = new User();
             user.setUsername(oidcUsername);
             user.setPassword("");
@@ -116,6 +119,36 @@ public class OIDCService {
         } catch (AccessException e) {
             // shouldn't happen, return default value
             return 18000;
+        }
+    }
+
+    /**
+     * Sync roles from OIDC to Nacos.
+     *
+     * @param username username
+     * @param roles    roles
+     */
+    public void syncRoles(String username, List<String> roles) {
+        List<String> oldRoles = roleService.getRoles(username).stream().map(RoleInfo::getRole).collect(Collectors.toList());
+        // delete old roles
+        for (String oldRole : oldRoles) {
+            // skip non-oidc roles
+            if (!oldRole.startsWith(AuthConstants.OIDC_ROLE_PREFIX)) {
+                continue;
+            }
+            // skip new roles
+            if (roles.contains(oldRole)) {
+                roles.remove(oldRole);
+                continue;
+            }
+            // delete old roles
+            roleService.deleteRole(oldRole, username);
+        }
+        // add new roles
+        for (String role : roles) {
+            if (role.startsWith(AuthConstants.OIDC_ROLE_PREFIX)) {
+                roleService.addRole(role, username);
+            }
         }
     }
 }

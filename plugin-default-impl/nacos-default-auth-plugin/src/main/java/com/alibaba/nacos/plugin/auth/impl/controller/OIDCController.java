@@ -44,6 +44,8 @@ import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Open ID Connect Endpoint.
@@ -109,7 +111,7 @@ public class OIDCController {
      */
     @GetMapping("/start")
     public void startAuthentication(@RequestParam("origin") String origin, HttpServletResponse response,
-            HttpSession session) throws IOException {
+                                    HttpSession session) throws IOException {
         if (oidcClient.checkIfProviderIsNotExist()) {
             return;
         }
@@ -136,7 +138,7 @@ public class OIDCController {
      */
     @GetMapping("/callback")
     public void callback(@RequestParam("code") String code, @RequestParam("state") String returnedState,
-            HttpServletResponse response, HttpSession session) throws IOException {
+                         HttpServletResponse response, HttpSession session) throws IOException {
         if (oidcClient.checkIfProviderIsNotExist()) {
             return;
         }
@@ -163,8 +165,12 @@ public class OIDCController {
         String callbackUri = ServletUriComponentsBuilder.fromCurrentContextPath().path(CALLBACK_PATH).toUriString();
         UserInfo userInfo = oidcClient.getUserInfo(new AuthorizationCode(code), callbackUri, state.getNonce());
 
-        // 输出userInfo
-        Loggers.AUTH.warn("try login with LDAP, user: {}, claims: {}", userInfo, userInfo.getVerifiedClaims());
+        List<String> groups = userInfo.getStringListClaim("groups")
+                .stream()
+                .map(s -> AuthConstants.OIDC_ROLE_PREFIX + s.toUpperCase()).collect(Collectors.toList());
+        // 输出userInfo 所有有效信息
+        Loggers.AUTH.warn("try login with LDAP, user: {}, groups: {}, email: {}, profile: {}",
+                userInfo, groups, userInfo.getClaim("email"), userInfo.getClaim("profile"));
 
         // Extract the username from the user info
         String preferredUsername = userInfo.getPreferredUsername();
@@ -178,6 +184,10 @@ public class OIDCController {
             return;
         }
 
+        // sync groups
+        oidcService.syncRoles(nacosUser.getUserName(), groups);
+
+        // set user info to session
         session.setAttribute(AuthConstants.NACOS_USER_KEY, nacosUser);
         session.setAttribute(com.alibaba.nacos.plugin.auth.constant.Constants.Identity.IDENTITY_ID,
                 nacosUser.getUserName());
