@@ -43,6 +43,8 @@ import org.springframework.web.util.UriComponentsBuilder;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -71,7 +73,7 @@ public class OIDCController {
         this.oidcService = oidcService;
     }
 
-    private static String buildRedirectUriWithPayload(String origin, String resultCode, String result) {
+    private static String buildRedirectUriWithPayload(String origin, String resultCode, String result) throws UnsupportedEncodingException {
         // split the origin URL into base URL and hash route
         int hashIndex = origin.indexOf(AuthConstants.HASH_ROUTE);
         String baseUrl = hashIndex != -1 ? origin.substring(0, hashIndex) : origin;
@@ -88,7 +90,7 @@ public class OIDCController {
             }
             hashRoute = sb.append(resultCode).append(AuthConstants.QUERY_PARAM_EQUAL).append(result).toString();
         }
-        return redirectUriBuilder.build().toUriString() + hashRoute;
+        return URLDecoder.decode(redirectUriBuilder.build().toUriString() + hashRoute, StandardCharsets.UTF_8.name());
     }
 
     /**
