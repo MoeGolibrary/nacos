@@ -166,7 +166,6 @@ public class OIDCController {
         // 输出userInfo
         Loggers.AUTH.warn("try login with LDAP, user: {}", userInfo.toJSONString());
 
-
         // Extract the username from the user info
         String preferredUsername = userInfo.getPreferredUsername();
         NacosUser nacosUser;
