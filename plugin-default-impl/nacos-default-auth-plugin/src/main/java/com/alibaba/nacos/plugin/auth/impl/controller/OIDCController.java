@@ -164,7 +164,7 @@ public class OIDCController {
         UserInfo userInfo = oidcClient.getUserInfo(new AuthorizationCode(code), callbackUri, state.getNonce());
 
         // 输出userInfo
-        Loggers.AUTH.warn("try login with LDAP, user: {}", userInfo.toJSONString());
+        Loggers.AUTH.warn("try login with LDAP, user: {}, claims: {}", userInfo, userInfo.getVerifiedClaims());
 
         // Extract the username from the user info
         String preferredUsername = userInfo.getPreferredUsername();
