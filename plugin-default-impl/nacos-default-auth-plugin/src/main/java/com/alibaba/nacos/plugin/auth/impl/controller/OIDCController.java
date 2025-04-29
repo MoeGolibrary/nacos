@@ -32,6 +32,7 @@ import com.nimbusds.jose.util.Base64URL;
 import com.nimbusds.oauth2.sdk.AuthorizationCode;
 import com.nimbusds.openid.connect.sdk.AuthenticationRequest;
 import com.nimbusds.openid.connect.sdk.claims.UserInfo;
+import io.grpc.netty.shaded.io.netty.handler.codec.http.HttpScheme;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -44,6 +45,7 @@ import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -118,7 +120,8 @@ public class OIDCController {
             return;
         }
 
-        String callbackUri = ServletUriComponentsBuilder.fromCurrentContextPath().path(CALLBACK_PATH).toUriString();
+        URI originUri = URI.create(origin);
+        String callbackUri = ServletUriComponentsBuilder.fromCurrentContextPath().scheme(originUri.getScheme()).path(CALLBACK_PATH).toUriString();
 
         AuthenticationRequest authRequest = oidcClient.createAuthenticationRequest(callbackUri, origin);
 
