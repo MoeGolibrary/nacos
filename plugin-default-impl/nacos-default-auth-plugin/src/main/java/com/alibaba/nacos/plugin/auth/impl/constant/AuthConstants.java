@@ -92,6 +92,8 @@ public class AuthConstants {
 
     public static final String OIDC_ROLE_PREFIX = "ROLE_OIDC_";
 
+    public static final String OIDC_CALLBACK_URI = "oidc_callback_uri";
+
     public static final String OIDC_STATE = "oidc_state";
     
     public static final String OIDC_NONCE = "oidc_nonce";

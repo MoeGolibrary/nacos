@@ -39,7 +39,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import org.springframework.web.util.UriComponentsBuilder;
-import org.springframework.web.util.UriUtils;
 
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
@@ -49,7 +48,6 @@ import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -77,28 +75,23 @@ public class OIDCController {
     }
 
     private static String buildRedirectUriWithPayload(String origin, String resultCode, String result) throws UnsupportedEncodingException {
-        if (origin == null || origin.isEmpty()) {
-            throw new IllegalArgumentException("Origin URL cannot be null or empty");
-        }
-        UriComponentsBuilder redirectUriBuilder = UriComponentsBuilder.fromUriString(origin);
+        // split the origin URL into base URL and hash route
         int hashIndex = origin.indexOf(AuthConstants.HASH_ROUTE);
-
         String baseUrl = hashIndex != -1 ? origin.substring(0, hashIndex) : origin;
         String hashRoute = hashIndex != -1 ? origin.substring(hashIndex) : "";
 
-        UriComponentsBuilder baseBuilder = UriComponentsBuilder.fromUriString(baseUrl);
-
-        // Append result code and value after hash
-        StringBuilder hashBuilder = new StringBuilder(hashRoute);
-        if (hashRoute.contains(AuthConstants.QUERY_PREFIX)) {
-            hashBuilder.append(AuthConstants.QUERY_PARAM_SEPARATOR);
-        } else {
-            hashBuilder.append(AuthConstants.QUERY_PREFIX);
+        // build redirect url with hash route and token
+        UriComponentsBuilder redirectUriBuilder = UriComponentsBuilder.fromUriString(baseUrl);
+        if (!hashRoute.isEmpty()) {
+            StringBuilder sb = new StringBuilder(hashRoute);
+            if (hashRoute.contains(AuthConstants.QUERY_PREFIX)) {
+                sb.append(AuthConstants.QUERY_PARAM_SEPARATOR);
+            } else {
+                sb.append(AuthConstants.QUERY_PREFIX);
+            }
+            hashRoute = sb.append(resultCode).append(AuthConstants.QUERY_PARAM_EQUAL).append(result).toString();
         }
-        hashBuilder.append(resultCode).append(AuthConstants.QUERY_PARAM_EQUAL).append(UriUtils.encode(result, StandardCharsets.UTF_8));
-
-        String fullUrl = baseBuilder.build().toUriString() + hashBuilder.toString();
-        return URLDecoder.decode(fullUrl, StandardCharsets.UTF_8.name());
+        return URLDecoder.decode(redirectUriBuilder.build().toUriString() + hashRoute, StandardCharsets.UTF_8.name());
     }
 
     /**
@@ -120,7 +113,8 @@ public class OIDCController {
      * @throws IOException IOException
      */
     @GetMapping("/start")
-    public void startAuthentication(@RequestParam("origin") String origin, HttpServletResponse response, HttpSession session) throws IOException {
+    public void startAuthentication(@RequestParam("origin") String origin, HttpServletResponse response,
+                                    HttpSession session) throws IOException {
         if (oidcClient.checkIfProviderIsNotExist()) {
             return;
         }
@@ -128,12 +122,9 @@ public class OIDCController {
         URI originUri = URI.create(origin);
         String callbackUri = ServletUriComponentsBuilder.fromCurrentContextPath().scheme(originUri.getScheme()).path(CALLBACK_PATH).toUriString();
 
-        Loggers.AUTH.info("OIDC callback uri: {}", callbackUri);
-
         AuthenticationRequest authRequest = oidcClient.createAuthenticationRequest(callbackUri, origin);
 
-        Loggers.AUTH.debug("OIDC auth request: {}", authRequest);
-
+        session.setAttribute(AuthConstants.OIDC_CALLBACK_URI, callbackUri);
         session.setAttribute(AuthConstants.OIDC_STATE, authRequest.getState().getValue());
         session.setAttribute(AuthConstants.OIDC_NONCE, authRequest.getNonce().getValue());
 
@@ -152,120 +143,59 @@ public class OIDCController {
      */
     @GetMapping("/callback")
     public void callback(@RequestParam("code") String code, @RequestParam("state") String returnedState,
-                         HttpServletResponse response, HttpSession session)
-            throws IOException {
+                         HttpServletResponse response, HttpSession session) throws IOException {
         if (oidcClient.checkIfProviderIsNotExist()) {
-            Loggers.AUTH.warn("[OIDC] Provider is not configured, ignoring callback.");
             return;
         }
-
-        Loggers.AUTH.info("[OIDC][Session:{}] Callback received with code={} state={}", session.getId(), code, returnedState);
-
+        // Check if the state is valid
         String originalState = (String) session.getAttribute(AuthConstants.OIDC_STATE);
         if (originalState == null) {
-            Loggers.AUTH.warn("[OIDC][Session:{}] Session expired or missing OIDC_STATE", session.getId());
-            handleSessionExpired(response, session);
+            String missingOrigin = ServletUriComponentsBuilder.fromCurrentContextPath().path(AuthConstants.LOGIN_PAGE)
+                    .toUriString();
+            String uriString = buildRedirectUriWithPayload(missingOrigin, AuthConstants.OIDC_PARAM_MSG,
+                    "Session expired");
+            response.sendRedirect(uriString);
             return;
         }
-
+        String json = Base64URL.from(originalState).decodeToString();
+        OIDCState state = JacksonUtils.toObj(json, OIDCState.class);
         if (!originalState.equals(returnedState)) {
-            Loggers.AUTH.warn("[OIDC][Session:{}] Invalid state provided, expected={}, actual={}", session.getId(), originalState, returnedState);
-            handleInvalidState(response, session, returnedState);
+            String uriString = buildRedirectUriWithPayload(state.getOrigin(), AuthConstants.OIDC_PARAM_MSG,
+                    "Invalid state");
+            response.sendRedirect(uriString);
             return;
         }
 
-        String callbackUri = ServletUriComponentsBuilder.fromCurrentContextPath().path(CALLBACK_PATH).toUriString();
-        UserInfo userInfo = oidcClient.getUserInfo(new AuthorizationCode(code), callbackUri, (String) session.getAttribute(AuthConstants.OIDC_NONCE));
-        session.removeAttribute(AuthConstants.OIDC_STATE);
-        session.removeAttribute(AuthConstants.OIDC_NONCE);
+        // Exchange the authorization code for the information
+        String callbackUri = (String) session.getAttribute(AuthConstants.OIDC_CALLBACK_URI);
+        UserInfo userInfo = oidcClient.getUserInfo(new AuthorizationCode(code), callbackUri, state.getNonce());
 
-        List<String> groups = getGroupsFromUserInfo(userInfo);
-        logUserInfo(userInfo, groups);
+        List<String> groups = userInfo.getStringListClaim("groups")
+                .stream()
+                .map(s -> AuthConstants.OIDC_ROLE_PREFIX + s.toUpperCase()).collect(Collectors.toList());
+        // 输出userInfo 所有有效信息
+        Loggers.AUTH.warn("try login with LDAP, user: {}, groups: {}, email: {}, profile: {}",
+                userInfo, groups, userInfo.getClaim("email"), userInfo.getClaim("profile"));
 
-        NacosUser nacosUser = processUserInfo(userInfo, session, response);
-        if (nacosUser == null) {
-            Loggers.AUTH.warn("[OIDC][Session:{}] Failed to process user info for login", session.getId());
+        // Extract the username from the user info
+        String preferredUsername = userInfo.getPreferredUsername();
+        NacosUser nacosUser;
+        try {
+            nacosUser = oidcService.getUser(preferredUsername);
+        } catch (AccessException e) {
+            String uriString = buildRedirectUriWithPayload(state.getOrigin(), AuthConstants.OIDC_PARAM_MSG,
+                    "User not found");
+            response.sendRedirect(uriString);
             return;
         }
 
-        Loggers.AUTH.info("[OIDC][User:{}] Syncing roles: {}", nacosUser.getUserName(), groups);
+        // sync groups
         oidcService.syncRoles(nacosUser.getUserName(), groups);
 
-        setSessionAttributes(session, nacosUser);
-
-        sendAuthHeaderAndRedirect(response, nacosUser, userInfo, session);
-    }
-
-    private void handleSessionExpired(HttpServletResponse response, HttpSession session) throws IOException {
-        session.removeAttribute(AuthConstants.OIDC_STATE);
-        session.removeAttribute(AuthConstants.OIDC_NONCE);
-        String missingOrigin = ServletUriComponentsBuilder.fromCurrentContextPath().path(AuthConstants.LOGIN_PAGE).toUriString();
-        String uriString = buildRedirectUriWithPayload(missingOrigin, AuthConstants.OIDC_PARAM_MSG, "Session expired");
-        response.sendRedirect(uriString);
-    }
-
-    private void handleInvalidState(HttpServletResponse response, HttpSession session, String returnedState) throws IOException {
-        session.removeAttribute(AuthConstants.OIDC_STATE);
-        session.removeAttribute(AuthConstants.OIDC_NONCE);
-
-        Loggers.AUTH.warn("[OIDC][Session:{}] Invalid state detected: {}", session.getId(), returnedState);
-
-        String json = Base64URL.from(returnedState).decodeToString();
-        try {
-            OIDCState state = JacksonUtils.toObj(json, OIDCState.class);
-            String uriString = buildRedirectUriWithPayload(state.getOrigin(), AuthConstants.OIDC_PARAM_MSG, "Invalid state");
-            response.sendRedirect(uriString);
-        } catch (Exception e) {
-            Loggers.AUTH.error("[OIDC] Failed to parse returned state: {}", returnedState, e);
-            String missingOrigin = ServletUriComponentsBuilder.fromCurrentContextPath().path(AuthConstants.LOGIN_PAGE).toUriString();
-            String uriString = buildRedirectUriWithPayload(missingOrigin, AuthConstants.OIDC_PARAM_MSG, "Invalid state format");
-            response.sendRedirect(uriString);
-        }
-    }
-
-    private List<String> getGroupsFromUserInfo(UserInfo userInfo) {
-        return userInfo.getStringListClaim("groups").stream()
-                .filter(Objects::nonNull).map(s -> AuthConstants.OIDC_ROLE_PREFIX + s.toUpperCase()).collect(Collectors.toList());
-    }
-
-    private void logUserInfo(UserInfo userInfo, List<String> groups) {
-        Loggers.AUTH.debug("try login with OIDC, user: {}, groups: {}, email: {}, profile: {}", userInfo.getSubject(),
-                groups, userInfo.getClaim("email"), userInfo.getClaim("profile"));
-    }
-
-    private NacosUser processUserInfo(UserInfo userInfo, HttpSession session, HttpServletResponse response) throws UnsupportedEncodingException {
-        String preferredUsername = userInfo.getPreferredUsername();
-        try {
-            return oidcService.getUser(preferredUsername);
-        } catch (AccessException e) {
-            String json = Base64URL.from((String) session.getAttribute(AuthConstants.OIDC_STATE)).decodeToString();
-            OIDCState state = JacksonUtils.toObj(json, OIDCState.class);
-            String uriString = buildRedirectUriWithPayload(state.getOrigin(), AuthConstants.OIDC_PARAM_MSG, "User not found");
-            try {
-                response.sendRedirect(uriString);
-            } catch (IOException ex) {
-                Loggers.AUTH.error("Failed to redirect after user not found", ex);
-            }
-            return null;
-        }
-    }
-
-    private void setSessionAttributes(HttpSession session, NacosUser nacosUser) {
+        // set user info to session
         session.setAttribute(AuthConstants.NACOS_USER_KEY, nacosUser);
-        session.setAttribute(com.alibaba.nacos.plugin.auth.constant.Constants.Identity.IDENTITY_ID, nacosUser.getUserName());
-    }
-
-    private void sendAuthHeaderAndRedirect(HttpServletResponse response, NacosUser nacosUser, UserInfo userInfo,
-                                           HttpSession session) throws IOException {
-        if (session.getAttribute(AuthConstants.OIDC_STATE) == null) {
-            Loggers.AUTH.warn("[OIDC][Session:{}] Cannot redirect, OIDC_STATE is missing", session.getId());
-            return;
-        }
-
-        final String json = Base64URL.from((String) session.getAttribute(AuthConstants.OIDC_STATE)).decodeToString();
-        final OIDCState state = JacksonUtils.toObj(json, OIDCState.class);
-
-        Loggers.AUTH.info("[OIDC][User:{}] Sending auth header and redirecting to origin: {}", nacosUser.getUserName(), state.getOrigin());
+        session.setAttribute(com.alibaba.nacos.plugin.auth.constant.Constants.Identity.IDENTITY_ID,
+                nacosUser.getUserName());
 
         response.addHeader(AuthConstants.AUTHORIZATION_HEADER, AuthConstants.TOKEN_PREFIX + nacosUser.getToken());
 
@@ -276,14 +206,11 @@ public class OIDCController {
         result.put(Constants.USERNAME, nacosUser.getUserName());
 
         byte[] resultCodedBytes = Base64.encodeBase64(result.toString().getBytes(StandardCharsets.UTF_8));
-        String encodedResult = UriUtils.encode(new String(resultCodedBytes, StandardCharsets.UTF_8), StandardCharsets.UTF_8);
 
-        String uriString = buildRedirectUriWithPayload(state.getOrigin(), AuthConstants.OIDC_PARAM_TOKEN, encodedResult);
-        try {
-            response.sendRedirect(uriString);
-        } catch (IOException e) {
-            Loggers.AUTH.error("[OIDC] Redirect failed for user [{}]", nacosUser.getUserName(), e);
-        }
+        String uriString = buildRedirectUriWithPayload(state.getOrigin(), AuthConstants.OIDC_PARAM_TOKEN,
+                new String(resultCodedBytes, StandardCharsets.UTF_8));
+
+        response.sendRedirect(uriString);
     }
-}
 
+}
