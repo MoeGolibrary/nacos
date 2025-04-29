@@ -35,6 +35,7 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.stream.Collectors;
 
 /**
@@ -45,6 +46,8 @@ import java.util.stream.Collectors;
 @SuppressWarnings("checkstyle:abbreviationaswordinname")
 @Service
 public class OIDCService {
+
+    private static final String USER_NOT_FOUND = "user not found";
 
     private final NacosUserDetailsServiceImpl userDetailsService;
 
@@ -66,48 +69,49 @@ public class OIDCService {
         return new NacosUser(username, token);
     }
 
-    private NacosUser getUserFormNacos(String username) throws AccessException {
+    private NacosUser getUserFromNacos(String username) throws AccessException {
         if (StringUtils.isBlank(username)) {
-            throw new AccessException("user not found!");
+            throw new AccessException(USER_NOT_FOUND);
         }
-        NacosUserDetails nacosUserDetails = (NacosUserDetails) userDetailsService.loadUserByUsername(username);
-        if (nacosUserDetails == null) {
-            throw new AccessException("user not found!");
+        UserDetails nacosUserDetails = userDetailsService.loadUserByUsername(username);
+        if (!(nacosUserDetails instanceof NacosUserDetails)) {
+            throw new AccessException(USER_NOT_FOUND);
         }
         return generateUserFromUsername(nacosUserDetails.getUsername());
     }
 
     public NacosUser getUser(String username) throws AccessException {
         try {
-            return getUserFormNacos(username);
-        } catch (AccessException | UsernameNotFoundException ignored) {
-            if (Loggers.AUTH.isWarnEnabled()) {
-                Loggers.AUTH.warn("try login with LDAP, user: {}", username);
+            return getUserFromNacos(username);
+        } catch (AccessException | UsernameNotFoundException e) {
+            if (Loggers.AUTH.isInfoEnabled()) {
+                Loggers.AUTH.info("[OIDC] Try login via LDAP prefix, user: {}", username, e);
             }
         }
 
-        UserDetails userDetails;
         try {
-            userDetails = userDetailsService.loadUserByUsername(AuthConstants.LDAP_PREFIX + username);
+            UserDetails userDetails = userDetailsService.loadUserByUsername(AuthConstants.LDAP_PREFIX + username);
             return generateUserFromUsername(userDetails.getUsername());
-        } catch (UsernameNotFoundException ignored) {
-            if (Loggers.AUTH.isWarnEnabled()) {
-                Loggers.AUTH.warn("try login with OIDC, user: {}", username);
+        } catch (UsernameNotFoundException e) {
+            if (Loggers.AUTH.isInfoEnabled()) {
+                Loggers.AUTH.info("[OIDC] Try login via OIDC prefix, user: {}", username, e);
             }
         }
 
         String oidcUsername = AuthConstants.OIDC_PREFIX + username;
+        UserDetails userDetails;
         try {
             userDetails = userDetailsService.loadUserByUsername(oidcUsername);
         } catch (UsernameNotFoundException ignored) {
+            // 注释说明：创建无密码的 OIDC 用户是预期行为
             userDetailsService.createUser(oidcUsername, "");
             User user = new User();
             user.setUsername(oidcUsername);
             user.setPassword("");
             userDetails = new NacosUserDetails(user);
         } catch (Exception e) {
-            Loggers.AUTH.error("[LDAP-LOGIN] failed", e);
-            throw new AccessException("user not found");
+            Loggers.AUTH.error("[OIDC-LOGIN] failed", e);
+            throw new AccessException(USER_NOT_FOUND);
         }
 
         return generateUserFromUsername(userDetails.getUsername());
@@ -117,7 +121,7 @@ public class OIDCService {
         try {
             return jwtTokenManager.getTokenTtlInSeconds(token);
         } catch (AccessException e) {
-            // shouldn't happen, return default value
+            Loggers.AUTH.error("[TOKEN-TTL] Failed to get token TTL", e);
             return 18000;
         }
     }
@@ -129,23 +133,26 @@ public class OIDCService {
      * @param roles    roles
      */
     public void syncRoles(String username, List<String> roles) {
-        List<String> oldRoles = roleService.getRoles(username).stream().map(RoleInfo::getRole).collect(Collectors.toList());
+        List<String> oldRoles = roleService.getRoles(username).stream()
+                .map(RoleInfo::getRole)
+                .collect(Collectors.toList());
+
+        List<String> mutableRoles = new ArrayList<>(roles);
+
         // delete old roles
         for (String oldRole : oldRoles) {
-            // skip non-oidc roles
             if (!oldRole.startsWith(AuthConstants.OIDC_ROLE_PREFIX)) {
                 continue;
             }
-            // skip new roles
-            if (roles.contains(oldRole)) {
-                roles.remove(oldRole);
+            if (mutableRoles.contains(oldRole)) {
+                mutableRoles.remove(oldRole);
                 continue;
             }
-            // delete old roles
             roleService.deleteRole(oldRole, username);
         }
+
         // add new roles
-        for (String role : roles) {
+        for (String role : mutableRoles) {
             if (role.startsWith(AuthConstants.OIDC_ROLE_PREFIX)) {
                 roleService.addRole(role, username);
             }

@@ -23,6 +23,8 @@ package com.alibaba.nacos.plugin.auth.impl.oidc;
  */
 @SuppressWarnings("checkstyle:abbreviationaswordinname")
 public class OIDCConfig {
+
+    private String name;
     
     private String scope;
     
@@ -33,6 +35,14 @@ public class OIDCConfig {
     private String issuerUri;
     
     private String idTokenSignAlgorithm;
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
     
     public String getIdTokenSignAlgorithm() {
         return idTokenSignAlgorithm;

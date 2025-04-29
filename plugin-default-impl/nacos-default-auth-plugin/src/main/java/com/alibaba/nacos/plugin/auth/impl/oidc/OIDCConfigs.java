@@ -30,50 +30,45 @@ public class OIDCConfigs {
     
     private static final String PREFIX = "nacos.core.auth.oidc";
     
-    private static final String KEY_PLACEHOLDER = ".{}";
-    
-    private static final String NAME = PREFIX + KEY_PLACEHOLDER + ".name";
-    
-    private static final String SCOPE = PREFIX + KEY_PLACEHOLDER + ".scope";
-    
-    private static final String CLIENT_ID = PREFIX + KEY_PLACEHOLDER + ".client-id";
-    
-    private static final String CLIENT_SECRET = PREFIX + KEY_PLACEHOLDER + ".client-secret";
-    
-    private static final String ISSUER_URI = PREFIX + KEY_PLACEHOLDER + ".issuer-uri";
-    
-    private static final String ID_TOKEN_SIGN_ALGORITHM = PREFIX + KEY_PLACEHOLDER + ".id-token-sign-algorithm";
-    
+    private static final String KEY_FORMAT = ".%s";
+
+    private static final String NAME = PREFIX + ".%s.name";
+
+    private static final String SCOPE = PREFIX + ".%s.scope";
+
+    private static final String CLIENT_ID = PREFIX + ".%s.client-id";
+
+    private static final String CLIENT_SECRET = PREFIX + ".%s.client-secret";
+
+    private static final String ISSUER_URI = PREFIX + ".%s.issuer-uri";
+
+    private static final String ID_TOKEN_SIGN_ALGORITHM = PREFIX + ".%s.id-token-sign-algorithm";
+
     public static OIDCConfig getConfiguration(String key) {
         if (key == null) {
             return null;
         }
         OIDCConfig oidcConfig = new OIDCConfig();
-        oidcConfig.setScope(getValueByKeyNotNull(SCOPE, key));
-        oidcConfig.setClientId(getValueByKeyNotNull(CLIENT_ID, key));
-        oidcConfig.setClientSecret(getValueByKeyNotNull(CLIENT_SECRET, key));
-        oidcConfig.setIssuerUri(getValueByKeyNotNull(ISSUER_URI, key));
+        oidcConfig.setName(getValueByKey(NAME, key, false));
+        oidcConfig.setScope(getValueByKey(SCOPE, key, false));
+        oidcConfig.setClientId(getValueByKey(CLIENT_ID, key, false));
+        oidcConfig.setClientSecret(getValueByKey(CLIENT_SECRET, key, false));
+        oidcConfig.setIssuerUri(getValueByKey(ISSUER_URI, key, false));
         oidcConfig.setIdTokenSignAlgorithm(getValueByKey(ID_TOKEN_SIGN_ALGORITHM, key, true));
         return oidcConfig;
     }
-    
-    public static String getValueByKeyNotNull(String path, String key) {
-        return getValueByKey(path, key, false);
-    }
-    
+
     public static String getValueByKey(String path, String key, boolean nullable) {
         Objects.requireNonNull(path, "path cannot be null");
         Objects.requireNonNull(key, "key cannot be null");
-        String finalKey = path.replace(KEY_PLACEHOLDER, "." + key);
+        String finalKey = String.format(path, key);
         String property = EnvUtil.getProperty(finalKey);
-        if (!nullable) {
-            if (property == null || property.trim().isEmpty()) {
-                throw new IllegalArgumentException(String.format("%s cannot be empty", finalKey));
-            }
+        if (!nullable && (property == null || property.trim().isEmpty())) {
+            throw new IllegalArgumentException("Configuration value cannot be empty");
         }
         return property;
     }
-    
+
     public static String getProvider() {
         String providerStr = EnvUtil.getProperty(PREFIX, String.class);
         if (providerStr == null || providerStr.trim().isEmpty()) {
@@ -85,8 +80,8 @@ public class OIDCConfigs {
         }
         return split[0];
     }
-    
+
     public static String getNameByKey(String key) {
-        return getValueByKeyNotNull(NAME, key);
+        return getValueByKey(NAME, key, false);
     }
 }

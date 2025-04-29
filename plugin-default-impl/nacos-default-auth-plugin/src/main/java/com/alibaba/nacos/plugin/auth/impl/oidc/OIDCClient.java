@@ -77,13 +77,26 @@ public class OIDCClient {
     private final OIDCConfig config;
     
     public OIDCClient(@Autowired(required = false) OIDCConfig config) {
+        OIDCConfig oidcConfig;
         if (config == null) {
-            this.config = OIDCConfigs.getConfiguration(OIDCConfigs.getProvider());
+            String provider = OIDCConfigs.getProvider();
+            if (provider == null || provider.trim().isEmpty()) {
+                LOGGER.warn("No OIDC provider configured and no default configuration available.");
+                oidcConfig = null;
+            } else {
+                try {
+                    oidcConfig = OIDCConfigs.getConfiguration(provider);
+                } catch (Exception e) {
+                    LOGGER.error("Failed to load default OIDC configuration", e);
+                    oidcConfig = null;
+                }
+            }
         } else {
-            this.config = config;
+            oidcConfig = config;
         }
+        this.config = oidcConfig;
     }
-    
+
     /**
      * Create an Open ID Connect Authentication Request.
      *
@@ -91,7 +104,6 @@ public class OIDCClient {
      * @return AuthenticationRequest
      */
     public AuthenticationRequest createAuthenticationRequest(String callbackUrl, String originUrl) {
-        // generate state and nonce and store them in session to prevent CSRF and replay attacks
         Nonce nonce = new Nonce();
         State state = new State();
         OIDCState oidcState = new OIDCState();
@@ -102,7 +114,7 @@ public class OIDCClient {
         return new Builder(RESPONSE_TYPE, getScope(), getClientId(), URI.create(callbackUrl)).endpointURI(
                 providerMetadata.getAuthorizationEndpointURI()).state(oidcState.toState()).nonce(nonce).build();
     }
-    
+
     /**
      * Get UserInfo from Authorization Server by exchange the authorization code.
      *
@@ -115,7 +127,7 @@ public class OIDCClient {
         OIDCProviderMetadata providerMetadata = getProviderMetadata();
         LOGGER.debug("Getting user info for authorization code");
         OIDCTokens oidcTokens = exchangeToken(authorizationCode, callbackUrl, nonce);
-        
+
         UserInfo userInfo = null;
         try {
             if (oidcTokens.getIDToken() != null && oidcTokens.getIDToken().getJWTClaimsSet() != null) {
@@ -125,24 +137,30 @@ public class OIDCClient {
             throw new IllegalStateException("Parsing ID token failed", e);
         }
         if (userInfo == null || hasEnoughInfo(userInfo)) {
-            UserInfoResponse userInfoResponse = exchangeUserInfo(providerMetadata.getUserInfoEndpointURI(),
-                    oidcTokens.getBearerAccessToken());
+            BearerAccessToken accessToken = oidcTokens.getBearerAccessToken();
+            if (accessToken == null) {
+                throw new IllegalStateException("Bearer access token is missing after token exchange");
+            }
+
+            UserInfoResponse userInfoResponse = exchangeUserInfo(providerMetadata.getUserInfoEndpointURI(), accessToken);
             if (userInfoResponse instanceof UserInfoErrorResponse) {
                 ErrorObject errorObject = ((UserInfoErrorResponse) userInfoResponse).getErrorObject();
                 if (errorObject == null || errorObject.getCode() == null) {
                     throw new IllegalStateException("UserInfo request failed: No error code returned "
-                            + "(identity provider not reachable - check network proxy setting 'http.nonProxyHosts' in 'sonar.properties')");
+                            + "(identity provider might be unreachable)");
                 } else {
                     throw new IllegalStateException("UserInfo request failed: " + errorObject.toJSONObject());
                 }
             }
             userInfo = ((UserInfoSuccessResponse) userInfoResponse).getUserInfo();
         }
-        
-        LOGGER.debug("User info: {}", userInfo.toJSONObject());
+
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("User info: {}", userInfo == null ? "null" : userInfo.toJSONObject());
+        }
         return userInfo;
     }
-    
+
     /**
      * Verify the OIDC client configuration has been configured correctly.
      * @return true if the provider is not configured
@@ -155,7 +173,7 @@ public class OIDCClient {
         }
         return false;
     }
-    
+
     /**
      * Return the current configure OIDC provider information.
      * @return OIDCProvider
@@ -170,7 +188,7 @@ public class OIDCClient {
         provider.setKey(providerKey);
         return provider;
     }
-    
+
     /**
      * Get OIDC Token from Authorization Server by exchange the authorization code.
      *
@@ -186,13 +204,12 @@ public class OIDCClient {
                     new ClientSecretBasic(getClientId(), getClientSecret()),
                     new AuthorizationCodeGrant(authorizationCode, new URI(callbackUrl)));
             HTTPResponse response = request.toHTTPRequest().send();
-            LOGGER.debug("Token response content: {}", response.getContent());
             TokenResponse tokenResponse = OIDCTokenResponseParser.parse(response);
             if (tokenResponse instanceof TokenErrorResponse) {
                 ErrorObject errorObject = ((TokenErrorResponse) tokenResponse).getErrorObject();
                 if (errorObject == null || errorObject.getCode() == null) {
                     throw new IllegalStateException("Token request failed: No error code returned "
-                            + "(identity provider not reachable - check network proxy setting 'http.nonProxyHosts' in 'sonar.properties')");
+                            + "(identity provider might be unreachable)");
                 } else {
                     throw new IllegalStateException("Token request failed: " + errorObject.toJSONObject());
                 }
@@ -206,27 +223,30 @@ public class OIDCClient {
         } catch (URISyntaxException | ParseException e) {
             throw new IllegalStateException("Retrieving access token failed", e);
         } catch (IOException e) {
-            throw new IllegalStateException("Retrieving access token failed: "
-                    + "Identity provider not reachable - check network proxy setting 'http.nonProxyHosts' in 'sonar.properties'");
+            throw new IllegalStateException("Retrieving access token failed: Identity provider might be unreachable");
         }
     }
-    
+
     protected UserInfoResponse exchangeUserInfo(URI userInfoEndpointURI, BearerAccessToken accessToken) {
         LOGGER.debug("Retrieving user info from {}", userInfoEndpointURI);
         try {
             UserInfoRequest request = new UserInfoRequest(userInfoEndpointURI, accessToken);
             HTTPResponse response = request.toHTTPRequest().send();
-            LOGGER.debug("UserInfo response content: {}", response.getContent());
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("UserInfo response content: [REDACTED]");
+            }
             return UserInfoResponse.parse(response);
         } catch (ParseException e) {
             throw new IllegalStateException("Retrieving user information failed", e);
         } catch (IOException e) {
-            throw new IllegalStateException("Retrieving user information failed: "
-                    + "Identity provider not reachable - check network proxy setting 'http.nonProxyHosts' in 'sonar.properties'");
+            throw new IllegalStateException("Retrieving user information failed: Identity provider might be unreachable");
         }
     }
-    
+
     private void validateIdToken(Issuer issuer, URI jwkSetURI, JWT idToken, String nonce) {
+        if (jwkSetURI == null) {
+            throw new IllegalStateException("JWK set URI is missing from provider metadata");
+        }
         LOGGER.debug("Validating ID token with {} and key set from from {}", getIdTokenSignAlgorithm(), jwkSetURI);
         try {
             IDTokenValidator validator = new IDTokenValidator(issuer, getClientId(), getIdTokenSignAlgorithm(),
@@ -240,44 +260,52 @@ public class OIDCClient {
             throw new IllegalStateException("Validating ID token failed", e);
         }
     }
-    
+
     protected OIDCProviderMetadata getProviderMetadata() {
+        if (config == null) {
+            throw new IllegalStateException("OIDC configuration is not initialized");
+        }
         LOGGER.debug("Retrieving provider metadata from {}", config.getIssuerUri());
         try {
             return OIDCProviderMetadata.resolve(new Issuer(config.getIssuerUri()));
         } catch (IOException | GeneralException e) {
             if (e instanceof GeneralException) {
                 throw new IllegalStateException("Retrieving OpenID Connect provider metadata failed: "
-                        + "Issuer URL in provider metadata doesn't match the issuer URI specified in plugin configuration");
+                        + "Issuer URL mismatch");
             } else {
                 throw new IllegalStateException("Retrieving OpenID Connect provider metadata failed", e);
             }
         }
     }
-    
+
     private Scope getScope() {
         return Scope.parse(config.getScope());
     }
-    
+
     private ClientID getClientId() {
-        return new ClientID(config.getClientId());
+        String clientId = config.getClientId();
+        if (clientId == null || clientId.trim().isEmpty()) {
+            throw new IllegalStateException("Client ID is not configured");
+        }
+        return new ClientID(clientId);
     }
-    
+
     private Secret getClientSecret() {
         String secret = config.getClientSecret();
         return secret == null ? new Secret("") : new Secret(secret);
     }
-    
+
     private boolean isIdTokenSigned() {
         return config.getIdTokenSignAlgorithm() != null;
     }
-    
+
     private JWSAlgorithm getIdTokenSignAlgorithm() {
         String algorithmName = config.getIdTokenSignAlgorithm();
         return algorithmName == null ? JWSAlgorithm.RS512 : new JWSAlgorithm(algorithmName);
     }
-    
+
     private boolean hasEnoughInfo(UserInfo userInfo) {
-        return userInfo.getName() != null && userInfo.getPreferredUsername() != null;
+        return userInfo.getName() != null && !userInfo.getName().trim().isEmpty()
+                && userInfo.getPreferredUsername() != null && !userInfo.getPreferredUsername().trim().isEmpty();
     }
 }
