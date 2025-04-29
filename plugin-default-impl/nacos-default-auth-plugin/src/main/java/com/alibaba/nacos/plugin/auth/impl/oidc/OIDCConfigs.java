@@ -27,9 +27,9 @@ import java.util.Objects;
  */
 @SuppressWarnings("checkstyle:abbreviationaswordinname")
 public class OIDCConfigs {
-    
+
     private static final String PREFIX = "nacos.core.auth.oidc";
-    
+
     private static final String KEY_FORMAT = ".%s";
 
     private static final String NAME = PREFIX + ".%s.name";
@@ -61,11 +61,17 @@ public class OIDCConfigs {
     public static String getValueByKey(String path, String key, boolean nullable) {
         Objects.requireNonNull(path, "path cannot be null");
         Objects.requireNonNull(key, "key cannot be null");
+
         String finalKey = String.format(path, key);
         String property = EnvUtil.getProperty(finalKey);
-        if (!nullable && (property == null || property.trim().isEmpty())) {
+
+        boolean isRequiredButMissing = !nullable;
+        boolean hasEmptyValue = property == null || property.trim().isEmpty();
+
+        if (isRequiredButMissing && hasEmptyValue) {
             throw new IllegalArgumentException("Configuration value cannot be empty");
         }
+
         return property;
     }
 
