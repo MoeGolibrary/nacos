@@ -81,6 +81,8 @@ public class OIDCService {
     }
 
     public NacosUser getUser(String username) throws AccessException {
+        Loggers.AUTH.info("[OIDC-LOGIN] Attempting to authenticate user: {}", username);
+
         try {
             return getUserFromNacos(username);
         } catch (AccessException | UsernameNotFoundException e) {
@@ -91,6 +93,7 @@ public class OIDCService {
 
         try {
             UserDetails userDetails = userDetailsService.loadUserByUsername(AuthConstants.LDAP_PREFIX + username);
+            Loggers.AUTH.info("[OIDC] Successfully authenticated via LDAP prefix for user: {}", username);
             return generateUserFromUsername(userDetails.getUsername());
         } catch (UsernameNotFoundException e) {
             if (Loggers.AUTH.isInfoEnabled()) {
@@ -102,7 +105,9 @@ public class OIDCService {
         UserDetails userDetails;
         try {
             userDetails = userDetailsService.loadUserByUsername(oidcUsername);
+            Loggers.AUTH.info("[OIDC] Found existing OIDC-prefixed user: {}", oidcUsername);
         } catch (UsernameNotFoundException ignored) {
+            Loggers.AUTH.warn("[OIDC] Creating new OIDC user automatically: {}", oidcUsername);
             // 注释说明：创建无密码的 OIDC 用户是预期行为
             userDetailsService.createUser(oidcUsername, "");
             User user = new User();
@@ -110,7 +115,7 @@ public class OIDCService {
             user.setPassword("");
             userDetails = new NacosUserDetails(user);
         } catch (Exception e) {
-            Loggers.AUTH.error("[OIDC-LOGIN] failed", e);
+            Loggers.AUTH.error("[OIDC-LOGIN] Failed to load or create OIDC user for: {}", username, e);
             throw new AccessException(USER_NOT_FOUND);
         }
 
@@ -118,10 +123,11 @@ public class OIDCService {
     }
 
     public long getTokenTtlInSeconds(String token) {
+        Loggers.AUTH.debug("[TOKEN-TTL] Requested TTL check for token");
         try {
             return jwtTokenManager.getTokenTtlInSeconds(token);
         } catch (AccessException e) {
-            Loggers.AUTH.error("[TOKEN-TTL] Failed to get token TTL", e);
+            Loggers.AUTH.error("[TOKEN-TTL] Failed to get token TTL for user", e);
             return 18000;
         }
     }
@@ -133,6 +139,8 @@ public class OIDCService {
      * @param roles    roles
      */
     public void syncRoles(String username, List<String> roles) {
+        Loggers.AUTH.info("[OIDC-SYNC-ROLES] Syncing roles for user: {}, roles: {}", username, roles);
+
         List<String> oldRoles = roleService.getRoles(username).stream()
                 .map(RoleInfo::getRole)
                 .collect(Collectors.toList());
@@ -145,17 +153,21 @@ public class OIDCService {
                 continue;
             }
             if (mutableRoles.contains(oldRole)) {
+                Loggers.AUTH.debug("[OIDC-SYNC-ROLES] Skipping deletion of existing role: {}", oldRole);
                 mutableRoles.remove(oldRole);
                 continue;
             }
+            Loggers.AUTH.info("[OIDC-SYNC-ROLES] Deleting obsolete role: {} for user: {}", oldRole, username);
             roleService.deleteRole(oldRole, username);
         }
 
         // add new roles
         for (String role : mutableRoles) {
             if (role.startsWith(AuthConstants.OIDC_ROLE_PREFIX)) {
+                Loggers.AUTH.info("[OIDC-SYNC-ROLES] Adding new role: {} for user: {}", role, username);
                 roleService.addRole(role, username);
             }
         }
     }
+
 }
