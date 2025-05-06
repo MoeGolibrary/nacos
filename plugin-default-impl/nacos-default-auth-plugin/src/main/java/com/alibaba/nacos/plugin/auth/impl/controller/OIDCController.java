@@ -22,13 +22,13 @@ import com.alibaba.nacos.common.utils.JacksonUtils;
 import com.alibaba.nacos.core.utils.Loggers;
 import com.alibaba.nacos.plugin.auth.exception.AccessException;
 import com.alibaba.nacos.plugin.auth.impl.constant.AuthConstants;
+import com.alibaba.nacos.plugin.auth.impl.oidc.JwtUtil;
 import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCClient;
+import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCConfig;
 import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCProvider;
 import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCService;
-import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCState;
 import com.alibaba.nacos.plugin.auth.impl.users.NacosUser;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.nimbusds.jose.util.Base64URL;
 import com.nimbusds.oauth2.sdk.AuthorizationCode;
 import com.nimbusds.openid.connect.sdk.AuthenticationRequest;
 import com.nimbusds.openid.connect.sdk.claims.UserInfo;
@@ -41,13 +41,14 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import javax.servlet.http.HttpServletResponse;
-import javax.servlet.http.HttpSession;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -68,13 +69,17 @@ public class OIDCController {
 
     private final OIDCService oidcService;
 
+    private final OIDCConfig oidcConfig;
+
     @Autowired
-    public OIDCController(OIDCClient oidcClient, OIDCService oidcService) {
+    public OIDCController(OIDCClient oidcClient, OIDCService oidcService, OIDCConfig oidcConfig) {
         this.oidcClient = oidcClient;
         this.oidcService = oidcService;
+        this.oidcConfig = oidcConfig;
     }
 
-    private static String buildRedirectUriWithPayload(String origin, String resultCode, String result) throws UnsupportedEncodingException {
+    static String buildRedirectUriWithPayload(String origin, String resultCode, String result) throws UnsupportedEncodingException {
+        origin = URLDecoder.decode(origin, StandardCharsets.UTF_8.name());
         // split the origin URL into base URL and hash route
         int hashIndex = origin.indexOf(AuthConstants.HASH_ROUTE);
         String baseUrl = hashIndex != -1 ? origin.substring(0, hashIndex) : origin;
@@ -109,12 +114,10 @@ public class OIDCController {
      * Start Open ID Connect Authentication Flow.
      *
      * @param response HttpServletResponse
-     * @param session  HttpSession
      * @throws IOException IOException
      */
     @GetMapping("/start")
-    public void startAuthentication(@RequestParam("origin") String origin, HttpServletResponse response,
-                                    HttpSession session) throws IOException {
+    public void startAuthentication(@RequestParam("origin") String origin, HttpServletResponse response) throws IOException {
         if (oidcClient.checkIfProviderIsNotExist()) {
             return;
         }
@@ -124,12 +127,16 @@ public class OIDCController {
 
         AuthenticationRequest authRequest = oidcClient.createAuthenticationRequest(callbackUri, origin);
 
-        session.setAttribute(AuthConstants.OIDC_CALLBACK_URI, callbackUri);
-        session.setAttribute(AuthConstants.OIDC_STATE, authRequest.getState().getValue());
-        session.setAttribute(AuthConstants.OIDC_NONCE, authRequest.getNonce().getValue());
+        String state = authRequest.getState().getValue();
+        String nonce = authRequest.getNonce().getValue();
 
-        // Redirect to Authentication endpoint
-        response.sendRedirect(authRequest.toURI().toString());
+        String jwtToken = JwtUtil.generateOidcToken(oidcConfig.getSecretKey(), origin, callbackUri, state, nonce);
+
+        // 跳转带上 token 参数
+        String redirectUrl = authRequest.toURI()
+                .toString() + "&token=" + URLEncoder.encode(jwtToken);
+
+        response.sendRedirect(redirectUrl);
     }
 
     /**
@@ -138,79 +145,75 @@ public class OIDCController {
      * @param code          Authorization Code
      * @param returnedState State returned by the authorization server
      * @param response      HttpServletResponse
-     * @param session       HttpSession
      * @throws IOException IOException
      */
     @GetMapping("/callback")
-    public void callback(@RequestParam("code") String code, @RequestParam("state") String returnedState,
-                         HttpServletResponse response, HttpSession session) throws IOException {
+    public void callback(@RequestParam("code") String code,
+                         @RequestParam("state") String returnedState,
+                         @RequestParam("token") String jwtToken,
+                         HttpServletResponse response) throws IOException {
+
         if (oidcClient.checkIfProviderIsNotExist()) {
             return;
         }
-        // Check if the state is valid
-        String originalState = (String) session.getAttribute(AuthConstants.OIDC_STATE);
-        if (originalState == null) {
+        if (!JwtUtil.verifyToken(oidcConfig.getSecretKey(), jwtToken)) {
             String missingOrigin = ServletUriComponentsBuilder.fromCurrentContextPath().path(AuthConstants.LOGIN_PAGE)
                     .toUriString();
-            String uriString = buildRedirectUriWithPayload(missingOrigin, AuthConstants.OIDC_PARAM_MSG,
-                    "Session expired");
+            String uriString = buildRedirectUriWithPayload(missingOrigin, AuthConstants.OIDC_PARAM_MSG, "Invalid token");
             response.sendRedirect(uriString);
             return;
         }
-        String json = Base64URL.from(originalState).decodeToString();
-        OIDCState state = JacksonUtils.toObj(json, OIDCState.class);
-        if (!originalState.equals(returnedState)) {
-            String uriString = buildRedirectUriWithPayload(state.getOrigin(), AuthConstants.OIDC_PARAM_MSG,
-                    "Invalid state");
-            response.sendRedirect(uriString);
-            return;
-        }
-
-        // Exchange the authorization code for the information
-        String callbackUri = (String) session.getAttribute(AuthConstants.OIDC_CALLBACK_URI);
-        UserInfo userInfo = oidcClient.getUserInfo(new AuthorizationCode(code), callbackUri, state.getNonce());
-
-        List<String> groups = userInfo.getStringListClaim("groups")
-                .stream()
-                .map(s -> AuthConstants.OIDC_ROLE_PREFIX + s.toUpperCase()).collect(Collectors.toList());
-        // 输出userInfo 所有有效信息
-        Loggers.AUTH.warn("try login with LDAP, user: {}, groups: {}, email: {}, profile: {}",
-                userInfo, groups, userInfo.getClaim("email"), userInfo.getClaim("profile"));
-
-        // Extract the username from the user info
-        String preferredUsername = userInfo.getPreferredUsername();
-        NacosUser nacosUser;
         try {
-            nacosUser = oidcService.getUser(preferredUsername);
-        } catch (AccessException e) {
-            String uriString = buildRedirectUriWithPayload(state.getOrigin(), AuthConstants.OIDC_PARAM_MSG,
-                    "User not found");
+            Map<String, Object> claims = JwtUtil.parseOidcToken(oidcConfig.getSecretKey(), jwtToken);
+            String originalState = (String) claims.get("state");
+            String nonce = (String) claims.get("nonce");
+            String callbackUri = (String) claims.get("callbackUri");
+            String origin = (String) claims.get("origin");
+
+            if (!originalState.equals(returnedState)) {
+                String uriString = buildRedirectUriWithPayload(origin, AuthConstants.OIDC_PARAM_MSG, "Invalid state");
+                response.sendRedirect(uriString);
+                return;
+            }
+            UserInfo userInfo = oidcClient.getUserInfo(new AuthorizationCode(code), callbackUri, nonce);
+
+            List<String> groups = userInfo.getStringListClaim("groups")
+                    .stream()
+                    .map(s -> AuthConstants.OIDC_ROLE_PREFIX + s.toUpperCase())
+                    .collect(Collectors.toList());
+
+            Loggers.AUTH.warn("try login with LDAP, user: {}, groups: {}, email: {}, profile: {}",
+                    userInfo, groups, userInfo.getClaim("email"), userInfo.getClaim("profile"));
+            String preferredUsername = userInfo.getPreferredUsername();
+            NacosUser nacosUser;
+            try {
+                nacosUser = oidcService.getUser(preferredUsername);
+            } catch (AccessException e) {
+                String uriString = buildRedirectUriWithPayload(origin, AuthConstants.OIDC_PARAM_MSG, "User not found");
+                response.sendRedirect(uriString);
+                return;
+            }
+
+            oidcService.syncRoles(nacosUser.getUserName(), groups);
+
+            ObjectNode result = JacksonUtils.createEmptyJsonNode();
+            result.put(Constants.ACCESS_TOKEN, nacosUser.getToken());
+            result.put(Constants.TOKEN_TTL, oidcService.getTokenTtlInSeconds(nacosUser.getToken()));
+            result.put(Constants.GLOBAL_ADMIN, nacosUser.isGlobalAdmin());
+            result.put(Constants.USERNAME, nacosUser.getUserName());
+
+            byte[] resultCodedBytes = Base64.encodeBase64(result.toString().getBytes(StandardCharsets.UTF_8));
+            String encodedResult = new String(resultCodedBytes, StandardCharsets.UTF_8);
+
+            String uriString = buildRedirectUriWithPayload(origin, AuthConstants.OIDC_PARAM_TOKEN, encodedResult);
             response.sendRedirect(uriString);
-            return;
+
+        } catch (Exception e) {
+            String missingOrigin = ServletUriComponentsBuilder.fromCurrentContextPath().path(AuthConstants.LOGIN_PAGE)
+                    .toUriString();
+            String uriString = buildRedirectUriWithPayload(missingOrigin, AuthConstants.OIDC_PARAM_MSG, "Invalid token");
+            response.sendRedirect(uriString);
         }
-
-        // sync groups
-        oidcService.syncRoles(nacosUser.getUserName(), groups);
-
-        // set user info to session
-        session.setAttribute(AuthConstants.NACOS_USER_KEY, nacosUser);
-        session.setAttribute(com.alibaba.nacos.plugin.auth.constant.Constants.Identity.IDENTITY_ID,
-                nacosUser.getUserName());
-
-        response.addHeader(AuthConstants.AUTHORIZATION_HEADER, AuthConstants.TOKEN_PREFIX + nacosUser.getToken());
-
-        ObjectNode result = JacksonUtils.createEmptyJsonNode();
-        result.put(Constants.ACCESS_TOKEN, nacosUser.getToken());
-        result.put(Constants.TOKEN_TTL, oidcService.getTokenTtlInSeconds(nacosUser.getToken()));
-        result.put(Constants.GLOBAL_ADMIN, nacosUser.isGlobalAdmin());
-        result.put(Constants.USERNAME, nacosUser.getUserName());
-
-        byte[] resultCodedBytes = Base64.encodeBase64(result.toString().getBytes(StandardCharsets.UTF_8));
-
-        String uriString = buildRedirectUriWithPayload(state.getOrigin(), AuthConstants.OIDC_PARAM_TOKEN,
-                new String(resultCodedBytes, StandardCharsets.UTF_8));
-
-        response.sendRedirect(uriString);
     }
 
 }
