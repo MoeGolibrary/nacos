@@ -22,13 +22,14 @@ import com.alibaba.nacos.common.utils.JacksonUtils;
 import com.alibaba.nacos.core.utils.Loggers;
 import com.alibaba.nacos.plugin.auth.exception.AccessException;
 import com.alibaba.nacos.plugin.auth.impl.constant.AuthConstants;
-import com.alibaba.nacos.plugin.auth.impl.oidc.JwtUtil;
 import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCClient;
 import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCProvider;
 import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCService;
+import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCState;
 import com.alibaba.nacos.plugin.auth.impl.users.NacosUser;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.nimbusds.oauth2.sdk.AuthorizationCode;
+import com.nimbusds.oauth2.sdk.id.State;
 import com.nimbusds.openid.connect.sdk.AuthenticationRequest;
 import com.nimbusds.openid.connect.sdk.claims.UserInfo;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,10 +45,8 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URLDecoder;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -119,20 +118,12 @@ public class OIDCController {
         }
 
         URI originUri = URI.create(origin);
-        String callbackUri = ServletUriComponentsBuilder.fromCurrentContextPath().scheme(originUri.getScheme()).path(CALLBACK_PATH).toUriString();
+        String callbackUri = ServletUriComponentsBuilder.fromCurrentContextPath().scheme(originUri.getScheme()).path(CALLBACK_PATH)
+                .toUriString();
 
         AuthenticationRequest authRequest = oidcClient.createAuthenticationRequest(callbackUri, origin);
 
-        String state = authRequest.getState().getValue();
-        String nonce = authRequest.getNonce().getValue();
-
-        String jwtToken = JwtUtil.generateOidcToken(oidcClient.getSecretKey(), origin, callbackUri, state, nonce);
-
-        // 跳转带上 token 参数
-        String redirectUrl = authRequest.toURI()
-                .toString() + "&token=" + URLEncoder.encode(jwtToken);
-
-        response.sendRedirect(redirectUrl);
+        response.sendRedirect(authRequest.toURI().toString());
     }
 
     /**
@@ -146,31 +137,25 @@ public class OIDCController {
     @GetMapping("/callback")
     public void callback(@RequestParam("code") String code,
                          @RequestParam("state") String returnedState,
-                         @RequestParam("token") String jwtToken,
                          HttpServletResponse response) throws IOException {
 
         if (oidcClient.checkIfProviderIsNotExist()) {
             return;
         }
-        if (!JwtUtil.verifyToken(oidcClient.getSecretKey(), jwtToken)) {
-            String missingOrigin = ServletUriComponentsBuilder.fromCurrentContextPath().path(AuthConstants.LOGIN_PAGE)
-                    .toUriString();
-            String uriString = buildRedirectUriWithPayload(missingOrigin, AuthConstants.OIDC_PARAM_MSG, "Invalid token");
-            response.sendRedirect(uriString);
-            return;
-        }
         try {
-            Map<String, Object> claims = JwtUtil.parseOidcToken(oidcClient.getSecretKey(), jwtToken);
-            String originalState = (String) claims.get("state");
-            String nonce = (String) claims.get("nonce");
-            String callbackUri = (String) claims.get("callbackUri");
-            String origin = (String) claims.get("origin");
+            // 解析state
+            OIDCState state = OIDCState.fromState(State.parse(returnedState));
+            String callbackUri = state.getCallbackUrl();
+            String nonce = state.getNonce();
+            String origin = state.getOrigin();
+            String originalState = state.getState();
 
             if (!originalState.equals(returnedState)) {
                 String uriString = buildRedirectUriWithPayload(origin, AuthConstants.OIDC_PARAM_MSG, "Invalid state");
                 response.sendRedirect(uriString);
                 return;
             }
+
             UserInfo userInfo = oidcClient.getUserInfo(new AuthorizationCode(code), callbackUri, nonce);
 
             List<String> groups = userInfo.getStringListClaim("groups")

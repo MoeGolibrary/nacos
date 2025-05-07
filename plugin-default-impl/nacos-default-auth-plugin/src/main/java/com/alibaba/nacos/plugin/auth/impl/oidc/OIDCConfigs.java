@@ -57,7 +57,6 @@ public class OIDCConfigs {
         oidcConfig.setClientSecret(getValueByKey(CLIENT_SECRET, key, false));
         oidcConfig.setIssuerUri(getValueByKey(ISSUER_URI, key, false));
         oidcConfig.setIdTokenSignAlgorithm(getValueByKey(ID_TOKEN_SIGN_ALGORITHM, key, true));
-        oidcConfig.setSecretKey(getValueByKey(SECRET_KEY, key, false));
         return oidcConfig;
     }
 

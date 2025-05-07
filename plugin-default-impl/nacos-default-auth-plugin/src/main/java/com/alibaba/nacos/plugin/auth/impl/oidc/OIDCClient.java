@@ -110,6 +110,7 @@ public class OIDCClient {
         oidcState.setState(state.getValue());
         oidcState.setNonce(nonce.getValue());
         oidcState.setOrigin(originUrl);
+        oidcState.setCallbackUrl(callbackUrl);
         OIDCProviderMetadata providerMetadata = getProviderMetadata();
         return new Builder(RESPONSE_TYPE, getScope(), getClientId(), URI.create(callbackUrl)).endpointURI(
                 providerMetadata.getAuthorizationEndpointURI()).state(oidcState.toState()).nonce(nonce).build();
@@ -307,9 +308,5 @@ public class OIDCClient {
     private boolean hasEnoughInfo(UserInfo userInfo) {
         return userInfo.getName() != null && !userInfo.getName().trim().isEmpty()
                 && userInfo.getPreferredUsername() != null && !userInfo.getPreferredUsername().trim().isEmpty();
-    }
-
-    public String getSecretKey() {
-        return config.getSecretKey();
     }
 }

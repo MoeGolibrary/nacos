@@ -36,8 +36,6 @@ public class OIDCConfig {
     
     private String idTokenSignAlgorithm;
 
-    private String secretKey;
-
     public String getName() {
         return name;
     }
@@ -84,13 +82,5 @@ public class OIDCConfig {
     
     public void setIssuerUri(String issuerUri) {
         this.issuerUri = issuerUri;
-    }
-
-    public String getSecretKey() {
-        return secretKey;
-    }
-
-    public void setSecretKey(String secretKey) {
-        this.secretKey = secretKey;
     }
 }
