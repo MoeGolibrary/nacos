@@ -27,6 +27,7 @@ import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCProvider;
 import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCService;
 import com.alibaba.nacos.plugin.auth.impl.users.NacosUser;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.nimbusds.oauth2.sdk.id.State;
 import com.nimbusds.openid.connect.sdk.AuthenticationRequest;
@@ -49,7 +50,6 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
 
 import static com.alibaba.nacos.plugin.auth.impl.controller.OIDCController.buildRedirectUriWithPayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -210,12 +210,12 @@ class OIDCControllerTest {
 
             // 同样可以 mock 其他静态方法
             mockedJwtUtil.when(() -> JwtUtil.parseOidcToken(SECRET_KEY, validJwtToken))
-                    .thenReturn(new HashMap<String, Object>() {{
-                        put("state", "state");
-                        put("nonce", "nonce");
-                        put("callbackUri", "callback");
-                        put("origin", origin);
-                    }});
+                    .thenReturn(ImmutableMap.of(
+                            "state", "state",
+                            "nonce", "nonce",
+                            "callbackUri", "callback",
+                            "origin", origin
+                    ));
 
             when(oidcClient.getUserInfo(any(), anyString(), anyString())).thenThrow(new RuntimeException("User info not found"));
 
