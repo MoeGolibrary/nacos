@@ -1,3 +1,19 @@
+/*
+ * Copyright 1999-2025 Alibaba Group Holding Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alibaba.nacos.plugin.auth.impl.oidc;
 
 import com.nimbusds.jose.JOSEException;
@@ -17,10 +33,14 @@ import java.util.Map;
 
 /**
  * JWT 工具类，用于生成和解析无状态 OIDC Token.
+ *
+ * @author xxx
  */
 public class JwtUtil {
 
-    // Token 有效时间（单位：毫秒），默认为 5 分钟
+    /**
+     * Token 有效时间（单位：毫秒），默认为 5 分钟.
+     */
     private static final long EXPIRATION = 5 * 60 * 1000;
 
     /**
@@ -85,7 +105,7 @@ public class JwtUtil {
         }
 
         // 提取数据
-        Map<String, Object> result = new HashMap<>();
+        Map<String, Object> result = new HashMap<>(4);
         result.put("origin", claims.getStringClaim("origin"));
         result.put("callbackUri", claims.getStringClaim("callbackUri"));
         result.put("state", claims.getStringClaim("state"));
