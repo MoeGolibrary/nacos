@@ -127,7 +127,7 @@ class OIDCControllerTest {
         when(authRequest.getState()).thenReturn(new State());
         when(authRequest.getNonce()).thenReturn(new Nonce());
         when(authRequest.toURI()).thenReturn(java.net.URI.create("http://auth-server.com/auth"));
-        when(oidcConfig.getSecretKey()).thenReturn(SECRET_KEY); // 示例：32字节长
+        when(oidcClient.getSecretKey()).thenReturn(SECRET_KEY); // 示例：32字节长
         when(oidcClient.createAuthenticationRequest(callbackUri, origin)).thenReturn(authRequest);
         when(oidcClient.checkIfProviderIsNotExist()).thenReturn(false);
 
@@ -159,7 +159,7 @@ class OIDCControllerTest {
         nacosUser.setToken("1234567890");
         nacosUser.setGlobalAdmin(true);
 
-        when(oidcConfig.getSecretKey()).thenReturn(SECRET_KEY); // 示例：32字节长
+        when(oidcClient.getSecretKey()).thenReturn(SECRET_KEY); // 示例：32字节长
         when(oidcClient.getUserInfo(any(), anyString(), anyString())).thenReturn(userInfo);
         when(oidcService.getUser("nacos")).thenReturn(nacosUser);
         when(oidcClient.checkIfProviderIsNotExist()).thenReturn(false);
@@ -202,7 +202,7 @@ class OIDCControllerTest {
         String origin = "http://localhost:8848/nacos/#/login";
         String validJwtToken = JwtUtil.generateOidcToken(SECRET_KEY, origin, "callback", "state", "nonce");
 
-        when(oidcConfig.getSecretKey()).thenReturn(SECRET_KEY); // 示例：32字节长
+        when(oidcClient.getSecretKey()).thenReturn(SECRET_KEY); // 示例：32字节长
         when(oidcClient.checkIfProviderIsNotExist()).thenReturn(false);
         try (MockedStatic<JwtUtil> mockedJwtUtil = mockStatic(JwtUtil.class)) {
             mockedJwtUtil.when(() -> JwtUtil.verifyToken(SECRET_KEY, validJwtToken))

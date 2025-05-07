@@ -24,7 +24,6 @@ import com.alibaba.nacos.plugin.auth.exception.AccessException;
 import com.alibaba.nacos.plugin.auth.impl.constant.AuthConstants;
 import com.alibaba.nacos.plugin.auth.impl.oidc.JwtUtil;
 import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCClient;
-import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCConfig;
 import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCProvider;
 import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCService;
 import com.alibaba.nacos.plugin.auth.impl.users.NacosUser;
@@ -69,13 +68,10 @@ public class OIDCController {
 
     private final OIDCService oidcService;
 
-    private final OIDCConfig oidcConfig;
-
     @Autowired
-    public OIDCController(OIDCClient oidcClient, OIDCService oidcService, OIDCConfig oidcConfig) {
+    public OIDCController(OIDCClient oidcClient, OIDCService oidcService) {
         this.oidcClient = oidcClient;
         this.oidcService = oidcService;
-        this.oidcConfig = oidcConfig;
     }
 
     static String buildRedirectUriWithPayload(String origin, String resultCode, String result) throws UnsupportedEncodingException {
@@ -130,7 +126,7 @@ public class OIDCController {
         String state = authRequest.getState().getValue();
         String nonce = authRequest.getNonce().getValue();
 
-        String jwtToken = JwtUtil.generateOidcToken(oidcConfig.getSecretKey(), origin, callbackUri, state, nonce);
+        String jwtToken = JwtUtil.generateOidcToken(oidcClient.getSecretKey(), origin, callbackUri, state, nonce);
 
         // 跳转带上 token 参数
         String redirectUrl = authRequest.toURI()
@@ -156,7 +152,7 @@ public class OIDCController {
         if (oidcClient.checkIfProviderIsNotExist()) {
             return;
         }
-        if (!JwtUtil.verifyToken(oidcConfig.getSecretKey(), jwtToken)) {
+        if (!JwtUtil.verifyToken(oidcClient.getSecretKey(), jwtToken)) {
             String missingOrigin = ServletUriComponentsBuilder.fromCurrentContextPath().path(AuthConstants.LOGIN_PAGE)
                     .toUriString();
             String uriString = buildRedirectUriWithPayload(missingOrigin, AuthConstants.OIDC_PARAM_MSG, "Invalid token");
@@ -164,7 +160,7 @@ public class OIDCController {
             return;
         }
         try {
-            Map<String, Object> claims = JwtUtil.parseOidcToken(oidcConfig.getSecretKey(), jwtToken);
+            Map<String, Object> claims = JwtUtil.parseOidcToken(oidcClient.getSecretKey(), jwtToken);
             String originalState = (String) claims.get("state");
             String nonce = (String) claims.get("nonce");
             String callbackUri = (String) claims.get("callbackUri");

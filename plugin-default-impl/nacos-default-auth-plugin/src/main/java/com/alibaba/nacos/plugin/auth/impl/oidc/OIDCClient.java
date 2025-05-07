@@ -308,4 +308,8 @@ public class OIDCClient {
         return userInfo.getName() != null && !userInfo.getName().trim().isEmpty()
                 && userInfo.getPreferredUsername() != null && !userInfo.getPreferredUsername().trim().isEmpty();
     }
+
+    public String getSecretKey() {
+        return config.getSecretKey();
+    }
 }
