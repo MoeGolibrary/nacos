@@ -29,7 +29,6 @@ import com.alibaba.nacos.plugin.auth.impl.oidc.OIDCState;
 import com.alibaba.nacos.plugin.auth.impl.users.NacosUser;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.nimbusds.oauth2.sdk.AuthorizationCode;
-import com.nimbusds.oauth2.sdk.id.State;
 import com.nimbusds.openid.connect.sdk.AuthenticationRequest;
 import com.nimbusds.openid.connect.sdk.claims.UserInfo;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -144,7 +143,7 @@ public class OIDCController {
         }
         try {
             // 解析state
-            OIDCState state = OIDCState.fromState(State.parse(returnedState));
+            OIDCState state = new OIDCState(returnedState);
             String callbackUri = state.getCallbackUrl();
             String nonce = state.getNonce();
             String origin = state.getOrigin();

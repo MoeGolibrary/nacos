@@ -17,7 +17,6 @@
 package com.alibaba.nacos.plugin.auth.impl.oidc;
 
 import com.alibaba.nacos.common.utils.JacksonUtils;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.nimbusds.jose.util.Base64URL;
 import com.nimbusds.oauth2.sdk.id.State;
 
@@ -38,6 +37,17 @@ public class OIDCState {
     private String callbackUrl;
 
     public OIDCState() {
+    }
+
+    public OIDCState(String stateStr) {
+        State state = State.parse(stateStr);
+        String encoded = state.getValue();
+        String json = Base64URL.from(encoded).decodeToString();
+        OIDCState oidcState = JacksonUtils.toObj(json, OIDCState.class);
+        this.state = oidcState.state;
+        this.nonce = oidcState.nonce;
+        this.origin = oidcState.origin;
+        this.callbackUrl = oidcState.callbackUrl;
     }
 
     public OIDCState(String origin, String callbackUrl, String nonce, String originalState) {
@@ -88,19 +98,6 @@ public class OIDCState {
 
     public void setCallbackUrl(String callbackUrl) {
         this.callbackUrl = callbackUrl;
-    }
-
-    /**
-     * Parse from Nimbus State.
-     *
-     * @param state Nimbus State object
-     * @return OIDCState instance
-     * @throws JsonProcessingException if JSON parsing failed
-     */
-    public static OIDCState fromState(State state) throws JsonProcessingException {
-        String encoded = state.getValue();
-        String json = Base64URL.from(encoded).decodeToString();
-        return JacksonUtils.toObj(json, OIDCState.class);
     }
 
 }
