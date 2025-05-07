@@ -103,7 +103,8 @@ public class ConfigChangeAspect {
         final String tag = configForm.getTag();
         final String configTags = configForm.getConfigTags();
         final String requestIpApp = configRequestInfo.getRequestIpApp();
-        final String scrIp = configRequestInfo.getSrcIp();
+        final String srcIp = configRequestInfo.getSrcIp();
+        final String srcUser = configForm.getSrcUser();
         final String scrType = configRequestInfo.getSrcType();
         final String betaIps = configRequestInfo.getBetaIps();
         String grayName = null;
@@ -138,7 +139,7 @@ public class ConfigChangeAspect {
         configChangeRequest.setArg("content", content);
         configChangeRequest.setArg("tag", tag);
         configChangeRequest.setArg("requestIpApp", requestIpApp);
-        configChangeRequest.setArg("srcIp", scrIp);
+        configChangeRequest.setArg("srcIp", srcIp);
         configChangeRequest.setArg("configTags", configTags);
         configChangeRequest.setArg("desc", desc);
         configChangeRequest.setArg("use", use);
@@ -146,6 +147,9 @@ public class ConfigChangeAspect {
         configChangeRequest.setArg("type", type);
         configChangeRequest.setArg("grayName", grayName);
         configChangeRequest.setArg("grayRuleExp", grayRuleExp);
+        configChangeRequest.setArg("srcUser", srcUser);
+        configChangeRequest.setArg("modifyTime", TimeUtils.getCurrentTimeStr());
+
         return configChangeServiceHandle(pjp, pluginServices, configChangeRequest);
     }
     
