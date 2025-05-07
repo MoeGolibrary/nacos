@@ -148,13 +148,9 @@ public class OIDCController {
             String callbackUri = state.getCallbackUrl();
             String nonce = state.getNonce();
             String origin = state.getOrigin();
-            String originalState = state.getState();
 
-            if (!originalState.equals(returnedState)) {
-                String uriString = buildRedirectUriWithPayload(origin, AuthConstants.OIDC_PARAM_MSG, "Invalid state");
-                response.sendRedirect(uriString);
-                return;
-            }
+            Loggers.AUTH.warn("try login with OIDC, state: {}, callbackUri: {}, nonce: {}, origin: {}",
+                    state, callbackUri, nonce, origin);
 
             UserInfo userInfo = oidcClient.getUserInfo(new AuthorizationCode(code), callbackUri, nonce);
 

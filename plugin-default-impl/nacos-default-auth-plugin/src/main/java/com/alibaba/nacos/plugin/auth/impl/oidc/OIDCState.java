@@ -37,6 +37,16 @@ public class OIDCState {
 
     private String callbackUrl;
 
+    public OIDCState() {
+    }
+
+    public OIDCState(String origin, String callbackUrl, String nonce, String originalState) {
+        this.state = originalState;
+        this.nonce = nonce;
+        this.origin = origin;
+        this.callbackUrl = callbackUrl;
+    }
+
     public String getState() {
         return state;
     }
