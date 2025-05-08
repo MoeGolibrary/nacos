@@ -260,6 +260,7 @@ const I18N_CONF = {
     historyCompareTitle: '历史版本比较',
     historyCompareLastVersion: '最新版本',
     historyCompareSelectedVersion: '当前选中版本',
+    actionType: '操作类型',
     publishType: '发布类型',
     formal: '正式版本',
     gray: '灰度版本',

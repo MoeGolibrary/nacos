@@ -48,7 +48,7 @@ public class ConfigTagsRelationMapperByMySql extends AbstractMapperByMysql imple
         List<Object> paramList = new ArrayList<>();
         StringBuilder where = new StringBuilder(" WHERE ");
         final String sql =
-                "SELECT a.id,a.data_id,a.group_id,a.tenant_id,a.app_name,a.content FROM config_info  a LEFT JOIN "
+                "SELECT a.id,a.data_id,a.group_id,a.tenant_id,a.app_name,a.content,a.type,a.md5 FROM config_info  a LEFT JOIN "
                         + "config_tags_relation b ON a.id=b.id";
         
         where.append(" a.tenant_id=? ");
@@ -94,7 +94,7 @@ public class ConfigTagsRelationMapperByMySql extends AbstractMapperByMysql imple
         final String[] types = (String[]) context.getWhereParameter(FieldConstant.TYPE);
         
         WhereBuilder where = new WhereBuilder(
-                "SELECT a.id,a.data_id,a.group_id,a.tenant_id,a.app_name,a.content,a.type "
+                "SELECT a.id,a.data_id,a.group_id,a.tenant_id,a.app_name,a.content,a.type,a.md5 "
                         + "FROM config_info a LEFT JOIN config_tags_relation b ON a.id=b.id");
         
         where.like("a.tenant_id", tenant);

@@ -693,7 +693,7 @@ public class ExternalConfigInfoPersistServiceImpl implements ConfigInfoPersistSe
             ConfigInfoMapper configInfoMapper = mapperManager.findMapper(dataSourceService.getDataSourceType(),
                     TableConstant.CONFIG_INFO);
             return this.jt.queryForObject(configInfoMapper.select(
-                    Arrays.asList("id", "data_id", "group_id", "tenant_id", "app_name", "content"),
+                    Arrays.asList("id", "data_id", "group_id", "tenant_id", "app_name", "content", "md5", "type"),
                     Collections.singletonList("id")), new Object[] {id}, CONFIG_INFO_ROW_MAPPER);
         } catch (EmptyResultDataAccessException e) { // Indicates that the data does not exist, returns null.
             return null;

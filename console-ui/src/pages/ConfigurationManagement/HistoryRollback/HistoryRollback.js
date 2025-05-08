@@ -461,6 +461,8 @@ class HistoryRollback extends React.Component {
                   return value;
                 }}
               />
+              <Table.Column title="MD5" dataIndex="md5" />
+              <Table.Column title={locale.actionType} dataIndex="opType" />
               <Table.Column title={locale.operator} dataIndex="srcUser" />
               <Table.Column
                 title={locale.lastUpdateTime}
